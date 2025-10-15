@@ -1,0 +1,35 @@
+{
+  "manifest_version": 1,
+  "version": "1.1.0",
+  "type": "APP",
+  "name": {
+    "en": "Field Usage Checker",
+    "ja": "フィールド使用状況チェッカー"
+  },
+  "description": {
+    "en": "This is a plugin that allows you to check field names, codes, field types, and usage status in a list.",
+    "ja": "フィールド名称・コード・フィールド型・使用状況を一覧で確認できるプラグインです。"
+  },
+  "icon": "image/icon.png",
+  "desktop": {
+    "js": [
+      "js/kuc.min.js",
+      "js/desktop.js",
+      "js/licenseChecker.js"
+    ],
+    "css": [
+      "css/51-modern-default.css"
+    ]
+  },
+  "config": {
+    "html": "config.html",
+    "js": [
+      "js/kuc.min.js",
+      "js/config.js",
+      "js/licenseChecker.js"
+    ],
+    "css": [
+      "css/51-modern-default.css"
+    ]
+  }
+}

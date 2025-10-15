@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <title>フィールド使用状況チェッカー</title>
+</head>
+
+<body>
+
+  <!-- ローディングアイコン -->
+  <div id="loading" style="display: none;">
+    <div class="spinner"></div>
+  </div>
+
+  <!--=========== 設定項目 ===========-->
+  <div class="kintoneplugin-row no-label-flex">
+    <label class="kintoneplugin-label">
+      <input type="checkbox" id="displayFieldcode">
+      詳細画面のフィールドラベルの横に フィールドコードを表示する
+    </label>
+  </div>
+
+  <hr>
+  
+  <div class="kintoneplugin-row">
+    <h2>フィールド使用状況チェッカー</h2>
+    <p>このアプリのフィールド一覧と使用箇所、開発メモを表示します。</p>
+  </div>
+
+  <table id="field-table" style="display: none;">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>フィールド名称</th>
+        <th>フィールドコード</th>
+        <th>フィールドタイプ</th>
+        <th>使用箇所</th>
+        <th>必須</th>
+        <th>重複禁止</th>
+        <th>初期値</th>
+        <th>メモ欄</th>
+      </tr>
+    </thead>
+    <tbody id="field-tbody">
+      <!-- データがここに追加されます -->
+    </tbody>
+  </table>
+
+  <!--=========== ボタン ===========-->
+  <div class="kintoneplugin-row kintoneplugin-button-area">
+    <button type="button" id="save-btn" class="kintoneplugin-button-dialog-ok">保存</button>
+    <button type="button" id="cancel-btn" class="kintoneplugin-button-dialog-cancel">キャンセル</button>
+  </div>
+
+  <script src="./licenseChecker.js"></script>
+  <script src="./config.js"></script>
+
+  <style>
+    .kintoneplugin-row {
+      margin-top: 40px;
+    }
+
+    #field-table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 1em;
+      background: #fff;
+      font-size: 15px;
+    }
+
+    #field-table th {
+      border: 1px solid #ddd;
+      padding: 6px 8px;
+      text-align: center;
+      vertical-align: middle;
+      line-height: 1.2;
+    }
+
+    #field-table td {
+      border: 1px solid #ddd;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: middle;
+      line-height: 1.2;
+    }
+
+    #field-table th {
+      background: #f4f8fb;
+      font-weight: bold;
+    }
+
+    #field-table input[disabled] {
+      background: #f3f3f3 !important;
+      color: #aaa !important;
+      cursor: not-allowed;
+    }
+
+    #field-table input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      /* 枠線・パディングも含めてセル内に収める */
+      min-width: 0;
+      /* 極端な崩れ防止 */
+    }
+
+    .row-subtable {
+      background-color: #f0f8ff;
+      font-weight: bold;
+    }
+
+    .row-subtable-child {
+      background-color: #f9fcff;
+    }
+
+    .row-reference {
+      background-color: #fff5e6;
+      font-weight: bold;
+    }
+
+    .row-reference-child {
+      background-color: #fffaf0;
+    }
+
+    /*looding用 */
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #ccc;
+      border-top: 5px solid #333;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 100px auto;
+      /* 真ん中に配置 */
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    #loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+
+    .config-description {
+      margin: 40px 12px;
+    }
+  </style>
+</body>
+
+</html>

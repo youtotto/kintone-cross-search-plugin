@@ -161,8 +161,9 @@
 
   // ===== フィールド取得（サブテーブル展開） =====
   async function fetchFormFields(appId) {
-    const resp = await kintone.api(kintone.api.url('/k/v1/app/form/fields.json', true), 'GET', { app: appId });
-    const props = resp.properties || {};
+    
+    const props = await kintone.app.getFormFields();
+    console.log(props);
 
     const rows = [];
 

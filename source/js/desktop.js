@@ -370,12 +370,8 @@
   // ✅ RESTで現在スキーマを取得し、スナップショットと比較して usableTargets を返す
   // =========================
   async function fetchCurrentFieldMapByRest(appId) {
-    const resp = await kintone.api(
-      kintone.api.url('/k/v1/app/form/fields.json', true),
-      'GET',
-      { app: appId }
-    );
-    const props = (resp && resp.properties) ? resp.properties : {};
+
+    const props = await kintone.app.getFormFields();
 
     const map = {}; // code -> {type, optionsLabel[]}
     const put = (f) => {

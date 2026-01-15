@@ -1,421 +1,422 @@
-(async function () {
+(function () {
   'use strict';
 
-  /* ──────────────────── config読み込み ─────────────────── */
   const PLUGIN_ID = kintone.$PLUGIN_ID;
-  const rawConfig = kintone.plugin.app.getConfig(PLUGIN_ID);
-  const notes = rawConfig?.notes ? JSON.parse(rawConfig.notes) : {};
-  const showFieldCode = rawConfig?.showFieldCode === 'true';
-  document.getElementById('displayFieldcode').checked = showFieldCode;
 
-  /* ──────────────────── licenseChecker.jsの読み込み ─────────────────── */
-  async function waitForLicenseChecker(timeout = 5000) {
-    return new Promise((resolve, reject) => {
-      const start = Date.now();
-      (function poll() {
-        if (window.FUC_licenseChecker?.checkLicense) return resolve(window.FUC_licenseChecker.checkLicense);
-        if (Date.now() - start > timeout) return reject(new Error('licenseChecker not loaded'));
-        setTimeout(poll, 50);
-      })();
-    });
-  }
+  // ===== config.html の要素 =====
+  const el = {
+    // ※ pos は削除方針でも落ちないよう optional で扱う
+    pos: document.getElementById('pos'),
 
+    // 入力の解釈
+    spaceJoin: document.getElementById('spaceJoin'),       // and / or
+    maxTokens: document.getElementById('maxTokens'),
 
-  /* ──────────────────── DOM キャッシュ ─────────────────── */
-  const saveBtn = document.getElementById('save-btn');
-  const cancelBtn = document.getElementById('cancel-btn');
+    // フィールド一覧
+    fieldFilter: document.getElementById('fieldFilter'),
+    btnSelectAll: document.getElementById('btnSelectAll'),
+    btnUnselectAll: document.getElementById('btnUnselectAll'),
+    tabs: Array.from(document.querySelectorAll('.nrc-tab')),
+    fieldTbody: document.getElementById('fieldTbody'),
 
+    // ボタン
+    btnSave: document.getElementById('btnSave'),
+    btnCancel: document.getElementById('btnCancel'),
 
-  /* ─────────────────── 汎用 UI 関数 ─────────────────── */
-  // ローディングを表示する
-  function showLoading() {
-    document.getElementById('loading').style.display = 'flex';
-  }
-
-  // ローディングを隠す
-  function hideLoading() {
-    document.getElementById('loading').style.display = 'none';
-  }
-
-  // kintone UI component: notification
-  function kucNotification(text, type, duration) {
-    const Kuc = window.Kucs["1.20.0"];
-    const notification = new Kuc.Notification({
-      text: text,
-      type: type, // 'info', 'success', 'danger' から選択
-      duration: duration
-    });
-    notification.open();
-  }
-
-  /* ─────────────────── 変数定義 ─────────────────── */
-  let usageMap = {};
-
-
-  /* ─────────────────── フィールド取得系 ─────────────────── */
-  async function getFieldList() {
-    return kintone.api(kintone.api.url('/k/v1/app/form/fields', true), 'GET', {
-      app: kintone.app.getId()
-    });
-  }
-
-  async function getLayout() {
-    const resp = await kintone.api(kintone.api.url('/k/v1/app/form/layout', true), 'GET', {
-      app: kintone.app.getId()
-    });
-    return resp.layout;
-  }
-
-  function getLayoutFieldCodes(layout) {
-    const codes = [];
-
-    function walk(layoutRows) {
-      layoutRows.forEach(row => {
-        if (row.type === 'ROW') {
-          row.fields.forEach(f => f.code && codes.push(f.code));
-        } else if (row.type === 'SUBTABLE') {
-          codes.push(row.code); // サブテーブル本体
-          row.fields.forEach(f => f.code && codes.push(f.code)); // サブテーブル内
-        } else if (row.type === 'GROUP') {
-          // グループ内のrowsを再帰で処理
-          walk(row.layout);
-        }
-        // SEPARATORは無視でOK
-      });
-    }
-    walk(layout);
-    return codes;
-  }
-
-  //
-  async function getAppUsageData(appId) {
-    const views = await kintone.api('/k/v1/app/views', 'GET', { app: appId });
-    const perRecordNotify = await kintone.api('/k/v1/app/notifications/perRecord.json', 'GET', { app: appId });
-    const reminderNotify = await kintone.api('/k/v1/app/notifications/reminder.json', 'GET', { app: appId });
-    const status = await kintone.api('/k/v1/app/status', 'GET', { app: appId });
-    const customize = await kintone.api('/k/v1/app/customize', 'GET', { app: appId });
-    const reports = await kintone.api('/k/v1/app/reports', 'GET', { app: appId });
-    const actions = await kintone.api('/k/v1/app/actions.json', 'GET', { app: appId });
-    return { views, perRecordNotify, reminderNotify, status, customize, reports, actions };
-  }
-
-  function extractUsedFields({ views, perRecordNotify, reminderNotify, status, customize, reports, actions }) {
-    const usageMap = {};
-
-    function mark(code, where) {
-      if (!usageMap[code]) usageMap[code] = new Set();
-      usageMap[code].add(where);
-    }
-
-    // 一覧ビュー
-    Object.values(views.views).forEach(view => {
-      (view.fields || []).forEach(code => mark(code, '一覧ビュー'));
-    });
-
-    // レコード通知（perRecord）
-    (perRecordNotify.notifications || []).forEach(n => {
-      const cond = n.filterCond || '';
-      Object.keys(usageMap).forEach(code => {
-        if (cond.includes(code)) mark(code, 'レコード通知');
-      });
-    });
-
-    // リマインダー通知（reminder）
-    (reminderNotify.notifications || []).forEach(n => {
-      const timingCode = n.timing?.code;
-      if (timingCode) mark(timingCode, 'リマインダー');
-      const cond = n.filterCond || '';
-      Object.keys(usageMap).forEach(code => {
-        if (cond.includes(code)) mark(code, 'リマインダー');
-      });
-    });
-
-    // プロセス管理
-    (status.actions || []).forEach(action => {
-      const cond = JSON.stringify(action);
-      for (const code in usageMap) {
-        if (cond.includes(code)) mark(code, 'プロセス管理');
-      }
-    });
-
-    // カスタマイズ（JS/CSS内のrecord.xxx形式の文字列検出）
-    const codePattern = /record\.(\w+)/g;
-    const jsCode = (customize.desktop.js || []).map(js => js.url || '').join('\n');
-    let match;
-    while ((match = codePattern.exec(jsCode)) !== null) {
-      const code = match[1];
-      mark(code, 'JavaScript');
-    }
-
-    // グラフ（レポート）
-    Object.values(reports.reports || {}).forEach(rep => {
-      // グループ
-      (rep.groups || []).forEach(group => {
-        if (group.code) mark(group.code, 'レポート');
-      });
-
-      // 集計対象（COUNTにはcodeがない）
-      (rep.aggregations || []).forEach(agg => {
-        if (agg.code) mark(agg.code, 'レポート');
-      });
-
-      // 条件式（文字列内に含まれていれば）
-      const cond = rep.filterCond || '';
-      Object.keys(usageMap).forEach(code => {
-        if (cond.includes(code)) mark(code, 'レポート');
-      });
-
-      // ソート（byがフィールドコードの場合に対応）
-      (rep.sorts || []).forEach(sort => {
-        const by = sort.by;
-        // GROUP1/GROUP2/TOTAL のような仮想キーを除外（推奨）
-        if (!['TOTAL', 'GROUP1', 'GROUP2'].includes(by)) {
-          mark(by, 'レポート');
-        }
-      });
-    });
-
-    // 7. アプリアクション
-    Object.values(actions.actions || {}).forEach(action => {
-      // mappings の srcField をチェック
-      (action.mappings || []).forEach(mapping => {
-        if (mapping.srcType === 'FIELD' && mapping.srcField) {
-          mark(mapping.srcField, 'アクション（マッピング）');
-        }
-      });
-
-      // 条件に含まれるフィールドを検出
-      const cond = action.filterCond || '';
-      Object.keys(usageMap).forEach(code => {
-        if (cond.includes(code)) mark(code, 'アクション（条件）');
-      });
-    });
-
-    return usageMap;
-  }
-
-
-  /* ─────────────────── テーブル生成 ─────────────────── */
-  function appendRow(tableBody, index, label, code, type, rowClass = '', required, unique, defaultValue) {
-    const tr = document.createElement('tr');
-    tr.dataset.code = code; // ← 保存用
-    if (rowClass) tr.className = rowClass;
-
-    const indexTd = document.createElement('td');
-    indexTd.textContent = index + 1;
-    tr.appendChild(indexTd);
-
-    const labelTd = document.createElement('td');
-    labelTd.textContent = label;
-    tr.appendChild(labelTd);
-
-    const codeTd = document.createElement('td');
-    codeTd.textContent = code;
-    tr.appendChild(codeTd);
-
-    const typeTd = document.createElement('td');
-    typeTd.textContent = type;
-    tr.appendChild(typeTd);
-
-    // 表の作成部分に追記
-    const usage = usageMap[code];
-    const usageStr = usage ? Array.from(usage).join('・') : '―';
-
-    const usageTd = document.createElement('td');
-    usageTd.textContent = usageStr;
-    tr.appendChild(usageTd);
-
-    // 必須か否か
-    const requiredTd = document.createElement('td');
-    requiredTd.textContent = !required ? '' : '〇';
-    tr.appendChild(requiredTd);
-
-    // 重複禁止
-    const uniqueTd = document.createElement('td');
-    uniqueTd.textContent = !unique ? '' : '〇';
-    tr.appendChild(uniqueTd);
-
-    // 初期値
-    const defaultValueTd = document.createElement('td');
-    defaultValueTd.textContent = defaultValue;
-    tr.appendChild(defaultValueTd);
-
-    const memoTd = document.createElement('td');
-    const memoInput = document.createElement('textarea');
-    memoInput.style.width = '100%';
-    memoInput.rows = 2;
-    memoInput.value = notes[code] || '';
-    memoTd.appendChild(memoInput);
-    tr.appendChild(memoTd);
-
-    tableBody.appendChild(tr);
-  }
-
-  // 汎用の初期値フォーマッタ（フィールド定義用）
-  function formatInitialValue(field) {
-    const t = field?.type;
-    const dv = field?.defaultValue;
-
-    // USER_SELECT / ORGANIZATION_SELECT は defaultValue が配列（Object or string）
-    if (t === 'USER_SELECT') {
-      // 例：[{ code:'user1', type:'USER' }, { code:'group1', type:'GROUP' }, { code:'LOGINUSER()', type:'FUNCTION' }]
-      const arr = Array.isArray(dv) ? dv : [];
-      return arr.map(e => {
-        if (e && typeof e === 'object') {
-          const kind = e.type;
-          const code = e.code;
-          if (kind === 'FUNCTION') {
-            // よく使う関数はラベル化（未知はそのまま表示）
-            if (code === 'LOGINUSER()') return 'ログインユーザー';
-            if (code === 'PRIMARY_ORGANIZATION()') return '主所属組織';
-            return code || '';
-          }
-          if (kind === 'USER') return `ユーザー:${code}`;
-          if (kind === 'GROUP') return `グループ:${code}`;
-          if (kind === 'ORGANIZATION') return `組織:${code}`;
-          return String(code ?? '');
-        }
-        // 念のため素の文字列にも対応
-        return String(e ?? '');
-      }).join(', ');
-    }
-
-    if (t === 'ORGANIZATION_SELECT') {
-      // 例：['org1', 'org2'] または [{ code:'org1', type:'ORGANIZATION' }]
-      const arr = Array.isArray(dv) ? dv : [];
-      return arr.map(e => {
-        if (e && typeof e === 'object') {
-
-          const kind = e.type;
-          const code = e.code;
-          if (kind === 'FUNCTION') {
-            // よく使う関数はラベル化（未知はそのまま表示）
-            if (code === 'PRIMARY_ORGANIZATION()') return '主所属組織';
-            return code || '';
-          }
-          if (kind === 'GROUP') return `グループ:${code}`;
-          if (kind === 'ORGANIZATION') return `組織:${code}`;
-          return `組織:${String(code ?? '')}`;
-        }
-
-        return `組織:${String(e ?? '')}`;
-      }).join(', ');
-    }
-
-    // それ以外は既存挙動に近いシンプル整形
-    if (dv == null) return '';
-    if (Array.isArray(dv)) return dv.join(', ');
-    if (typeof dv === 'object') {
-      // 既定では [object Object] にならないよう JSON文字列化（短く）
-      try { return JSON.stringify(dv); } catch { return String(dv); }
-    }
-    return String(dv);
-  }
-
-  /* ─────────────────── イベント登録 ─────────────────── */
-  saveBtn.addEventListener('click', save);
-  cancelBtn.addEventListener('click', cancel);
-
-
-  /* ─────────────────── 保存 / キャンセル ─────────────────── */
-  function save() {
-
-    const memoMap = {};
-    const rows = document.querySelectorAll('#field-tbody tr');
-
-    // ✅ チェックボックスの状態を取得
-    const checked = document.getElementById('displayFieldcode').checked;
-
-    rows.forEach(row => {
-      const code = row.dataset.code; // 行に field-code をセットしておく
-      if (!code) return;
-
-      const memo = row.querySelector('textarea')?.value?.trim();
-      if (memo) {
-        memoMap[code] = memo;
-      }
-    });
-
-    kintone.plugin.app.setConfig({
-      notes: JSON.stringify(memoMap),
-      showFieldCode: checked ? 'true' : 'false'
-    }, () => {
-      location.href = `/k/admin/app/${kintone.app.getId()}/plugin/?message=CONFIG_SAVED#/`;
-    });
-  }
-
-  function cancel() {
-    location.href = `/k/admin/app/${kintone.app.getId()}/plugin/`;
+    // エラー
+    errBasic: document.getElementById('errBasic'),
+    errFields: document.getElementById('errFields')
   };
 
+  // タブ状態（ALL / LIKE / IN / FILE）
+  let currentTypeFilter = 'ALL';
 
-  /* ────────────── 初期化 ────────────── */
-  (async () => {
+  // 描画用フィールド行
+  // { code, label, type, typeLabel, op, group, isSubtable, parentCode, parentLabel, options }
+  let fieldRows = [];
 
-    showLoading();
+  // ===== フィールドタイプ表示 =====
+  const TYPE_LABEL_MAP = {
+    SINGLE_LINE_TEXT: '文字列（1行）',
+    MULTI_LINE_TEXT: '文字列（複数行）',
+    LINK: 'リンク',
+    EMAIL: 'メールアドレス',
+    PHONE_NUMBER: '電話番号',
+    DROP_DOWN: 'ドロップダウン',
+    FILE: '添付ファイル',
+    SUBTABLE: 'サブテーブル'
+  };
 
+  const LIKE_TYPES = new Set([
+    'SINGLE_LINE_TEXT',
+    'MULTI_LINE_TEXT',
+    'LINK',
+    'EMAIL',
+    'PHONE_NUMBER'
+  ]);
+
+  const IN_TYPES = new Set([
+    'DROP_DOWN'
+  ]);
+
+  const FILE_TYPES = new Set(['FILE']);
+
+  function resolveOperatorByType(type) {
+    if (FILE_TYPES.has(type)) return 'like';
+    if (LIKE_TYPES.has(type)) return 'like';
+    if (IN_TYPES.has(type)) return 'in';
+    return null; // 対象外
+  }
+
+  function resolveGroupByType(type) {
+    if (FILE_TYPES.has(type)) return 'FILE';
+    if (IN_TYPES.has(type)) return 'IN';
+    if (LIKE_TYPES.has(type)) return 'LIKE';
+    return 'OTHER';
+  }
+
+  // ===== util =====
+  function showError(targetEl, message) {
+    if (!targetEl) return;
+    targetEl.textContent = message || '';
+    targetEl.classList.toggle('is-show', Boolean(message));
+  }
+
+  function escapeHtml(s) {
+    return (s ?? '')
+      .toString()
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function getAppId() {
+    const id = (kintone.app && typeof kintone.app.getId === 'function') ? kintone.app.getId() : null;
+    if (!id) throw new Error('アプリIDの取得に失敗しました。アプリの設定画面からプラグイン設定を開いているか確認してください。');
+    return id;
+  }
+
+  function readConfig() {
+    const cfg = kintone.plugin.app.getConfig(PLUGIN_ID) || {};
+
+    let selected = [];
     try {
-      checkLicense = await waitForLicenseChecker();
-      const ok = await checkLicense();
-      if (!ok) return;
+      selected = cfg.targetsJson ? JSON.parse(cfg.targetsJson) : [];
+      if (!Array.isArray(selected)) selected = [];
     } catch (e) {
-      return;
+      selected = [];
     }
 
-    const fieldResp = await getFieldList();
-    const layout = await getLayout();
-    const usageData = await getAppUsageData(kintone.app.getId());
-    usageMap = extractUsedFields(usageData);
-    const codes = getLayoutFieldCodes(layout);
-    const fieldMap = fieldResp.properties;
+    // ✅ 追加：fieldSnapshotJson（config.js側で使わなくても保持しておく）
+    let snapshot = [];
+    try {
+      snapshot = cfg.fieldSnapshotJson ? JSON.parse(cfg.fieldSnapshotJson) : [];
+      if (!Array.isArray(snapshot)) snapshot = [];
+    } catch (e) {
+      snapshot = [];
+    }
 
-    const tbody = document.getElementById('field-tbody');
-    tbody.innerHTML = '';
+    return {
+      // pos は残っていてもOK / HTMLから消えていてもOK
+      pos: cfg.pos || 'list_header',
+      spaceJoin: cfg.spaceJoin === 'or' ? 'or' : 'and',
+      maxTokens: cfg.maxTokens ? Number(cfg.maxTokens) : 3,
+      selectedTargets: selected, // [{code, op}]
+      fieldSnapshot: snapshot // ←追加
+    };
+  }
 
-    let count = 0;
-    for (const code of codes) {
-      const field = fieldMap[code];
-      if (!field) continue;
-      const defText = formatInitialValue(field);
+  function writeConfig(configObj) {
+    return new Promise(() => {
+      kintone.plugin.app.setConfig(configObj, () => {
+        location.href = `/k/admin/app/${kintone.app.getId()}/plugin/?message=CONFIG_SAVED#/`;
+      });
+    });
+  }
 
-      if (field.type === 'REFERENCE_TABLE') {
-        // 1. 関連アプリIDを取得
-        const relatedAppId = field.referenceTable.relatedApp.app;
-        const relatedFieldCodes = field.referenceTable.displayFields;
+  function buildFieldSnapshotFromSelected(selectedCodes) {
+    // desktop.js で UI生成・整合性チェックに使う前提のスナップショット
+    const snap = selectedCodes.map(code => {
+      const row = fieldRows.find(r => r.code === code);
+      return {
+        code,
+        label: row ? row.label : '',
+        type: row ? row.type : 'UNKNOWN',
+        op: row ? row.op : 'like',
+        // サブテーブル情報（desktop側で「Table/Field表示」したいとき便利）
+        isSubtable: row ? Boolean(row.isSubtable) : false,
+        parentCode: row ? (row.parentCode || '') : '',
+        parentLabel: row ? (row.parentLabel || '') : '',
+        // 選択肢系のみ
+        options: (row && row.type === 'DROP_DOWN' && Array.isArray(row.options)) ? row.options : []
+      };
+    });
 
-        // 2. 表示用に関連レコード一覧フィールド本体を追加
-        appendRow(tbody, count++, field.label, field.code, field.type, 'row-reference', field.required, field.unique, defText);
+    // 保存の見通しを良くするため、code順で固定
+    snap.sort((a, b) => (a.code || '').localeCompare(b.code || '', 'ja'));
+    return snap;
+  }
 
-        // 3. 関連アプリからフィールド情報を取得
-        const relatedFieldsResp = await kintone.api(
-          kintone.api.url('/k/v1/app/form/fields', true),
-          'GET',
-          { app: relatedAppId }
-        );
-        const relatedFieldProps = relatedFieldsResp.properties;
+  // ===== フィールド取得（サブテーブル展開） =====
+  async function fetchFormFields(appId) {
+    const resp = await kintone.api(kintone.api.url('/k/v1/app/form/fields.json', true), 'GET', { app: appId });
+    const props = resp.properties || {};
 
-        // 4. 表示フィールドをループして行を追加
-        for (const refCode of relatedFieldCodes) {
-          const refField = relatedFieldProps[refCode];
-          const label = refField?.label || '(不明なフィールド)';
-          const type = refField?.type || '(?)';
-          appendRow(tbody, count++, `┗ ${label}`, refCode, type, 'row-reference-child', field.required, field.unique, defText);
-        }
-      } else if (field.type === 'SUBTABLE') {
-        appendRow(tbody, count++, field.label, field.code, field.type, 'row-subtable', field.required, field.unique, defText);
-        for (const subCode in field.fields) {
-          const subField = field.fields[subCode];
-          const subDef = formatInitialValue(subField); 
-          appendRow(tbody, count++, `┗ ${subField.label}`, subField.code, subField.type, 'row-subtable-child', subField.required, subField.unique, subDef);
-        }
-      } else {
-        appendRow(tbody, count++, field.label, field.code, field.type, '', field.required, field.unique, defText);
+    const rows = [];
+
+    const extractDropDownOptions = (field) => {
+      // fields.json の options は { "表示ラベル": { ... } } 形式
+      const opt = field && field.options ? field.options : null;
+      if (!opt || typeof opt !== 'object') return [];
+      return Object.keys(opt).filter(k => k !== '__proto__').sort((a, b) => a.localeCompare(b, 'ja'));
+    };
+
+    // 1) トップレベル
+    Object.keys(props).forEach((code) => {
+      const f = props[code];
+      if (!f) return;
+
+      if (f.type === 'SUBTABLE') {
+        // 2) サブテーブル内部を展開
+        const sub = f.fields || {};
+        Object.keys(sub).forEach((subCode) => {
+          const sf = sub[subCode];
+          if (!sf) return;
+
+          const op = resolveOperatorByType(sf.type);
+          if (!op) return;
+
+          const group = resolveGroupByType(sf.type);
+          const typeLabel = TYPE_LABEL_MAP[sf.type] || sf.type;
+
+          rows.push({
+            code: sf.code || subCode,
+            label: sf.label || subCode,
+            type: sf.type,
+            typeLabel,
+            op,
+            group,
+            options: (sf.type === 'DROP_DOWN') ? extractDropDownOptions(sf) : [],
+            isSubtable: true,
+            parentCode: f.code || code,
+            parentLabel: f.label || code
+          });
+        });
+        return;
       }
+
+      // 通常フィールド
+      const op = resolveOperatorByType(f.type);
+      if (!op) return;
+
+      const group = resolveGroupByType(f.type);
+      const typeLabel = TYPE_LABEL_MAP[f.type] || f.type;
+
+      rows.push({
+        code: f.code || code,
+        label: f.label || code,
+        type: f.type,
+        typeLabel,
+        op,
+        group,
+        options: (f.type === 'DROP_DOWN') ? extractDropDownOptions(f) : [],
+        isSubtable: false,
+        parentCode: '',
+        parentLabel: ''
+      });
+    });
+
+    // 並び：サブテーブル→親ラベル→子ラベル、通常→ラベル
+    rows.sort((a, b) => {
+      const aKey = `${a.isSubtable ? '1' : '0'}|${a.parentLabel || ''}|${a.label || ''}|${a.code || ''}`;
+      const bKey = `${b.isSubtable ? '1' : '0'}|${b.parentLabel || ''}|${b.label || ''}|${b.code || ''}`;
+      return aKey.localeCompare(bKey, 'ja');
+    });
+
+    return rows;
+  }
+
+  // ===== 描画 =====
+  function renderFieldTable(selectedSet) {
+    const html = fieldRows.map((r) => {
+      const checked = selectedSet.has(r.code) ? 'checked' : '';
+      const badge = r.op === 'in'
+        ? '<span class="nrc-badge">in</span>'
+        : '<span class="nrc-badge">like</span>';
+
+      const name = r.isSubtable
+        ? `${escapeHtml(r.parentLabel)} / ${escapeHtml(r.label)}`
+        : escapeHtml(r.label);
+
+      return `
+        <tr
+          data-code="${escapeHtml(r.code)}"
+          data-label="${escapeHtml(name)}"
+          data-group="${escapeHtml(r.group)}"
+        >
+          <td><input type="checkbox" class="js-target" data-code="${escapeHtml(r.code)}" ${checked}></td>
+          <td>${name}</td>
+          <td><code>${escapeHtml(r.code)}</code></td>
+          <td>${escapeHtml(r.typeLabel)}</td>
+          <td>${badge}</td>
+        </tr>
+      `;
+    }).join('');
+
+    if (el.fieldTbody) el.fieldTbody.innerHTML = html;
+  }
+
+  function setTabSelected(type) {
+    currentTypeFilter = type;
+    el.tabs.forEach(btn => {
+      btn.setAttribute('aria-selected', btn.dataset.type === type ? 'true' : 'false');
+    });
+  }
+
+  function applyTableFilter() {
+    const keyword = (el.fieldFilter && el.fieldFilter.value ? el.fieldFilter.value : '').trim().toLowerCase();
+    const tbody = el.fieldTbody;
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    rows.forEach((tr) => {
+      const code = (tr.dataset.code || '').toLowerCase();
+      const label = (tr.dataset.label || '').toLowerCase();
+      const group = tr.dataset.group || 'OTHER';
+
+      const hitKeyword = !keyword || code.includes(keyword) || label.includes(keyword);
+
+      let hitType = true;
+      if (currentTypeFilter === 'LIKE') hitType = (group === 'LIKE');
+      if (currentTypeFilter === 'IN') hitType = (group === 'IN');
+      if (currentTypeFilter === 'FILE') hitType = (group === 'FILE');
+
+      tr.style.display = (hitKeyword && hitType) ? '' : 'none';
+    });
+  }
+
+  function getSelectedCodes() {
+    const checks = Array.from(document.querySelectorAll('.js-target'));
+    return checks.filter(c => c.checked).map(c => c.dataset.code).filter(Boolean);
+  }
+
+  function setVisibleCheckboxes(checked) {
+    const tbody = el.fieldTbody;
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach(tr => {
+      if (tr.style.display === 'none') return;
+      const cb = tr.querySelector('.js-target');
+      if (cb) cb.checked = checked;
+    });
+  }
+
+  // ===== 保存 =====
+  function validateBeforeSave() {
+    showError(el.errBasic, '');
+    showError(el.errFields, '');
+
+    const maxTokens = Number(el.maxTokens && el.maxTokens.value);
+    if (!Number.isFinite(maxTokens) || maxTokens < 1 || maxTokens > 10) {
+      showError(el.errBasic, '「検索語の上限」は 1〜10 の数値で指定してください。');
+      return false;
     }
 
-    document.getElementById('field-table').style.display = 'table';
+    const selected = getSelectedCodes();
+    if (selected.length === 0) {
+      showError(el.errFields, '検索対象フィールドが未選択です。少なくとも1つ選択してください。');
+      return false;
+    }
+    return true;
+  }
 
-    hideLoading();
-  })();
+  function buildTargetsFromSelected(selectedCodes) {
+    return selectedCodes.map(code => {
+      const row = fieldRows.find(r => r.code === code);
+      return { code, op: row ? row.op : 'like' };
+    });
+  }
 
+  async function onSave() {
+    if (!validateBeforeSave()) return;
+
+    const selectedCodes = getSelectedCodes();
+
+    // 検索対象（クエリ生成用：最小）
+    const targets = buildTargetsFromSelected(selectedCodes);
+    const targetsJson = JSON.stringify(targets);
+
+    // ✅ desktop.js用スナップショット（type / options などを保存）
+    const fieldSnapshot = buildFieldSnapshotFromSelected(selectedCodes);
+    const fieldSnapshotJson = JSON.stringify(fieldSnapshot);
+
+    const config = {
+      // pos は HTMLから削除しているなら保存しない（存在する場合のみ保存）
+      ...(el.pos ? { pos: el.pos.value } : {}),
+
+      spaceJoin: el.spaceJoin && el.spaceJoin.value === 'or' ? 'or' : 'and',
+      maxTokens: String(Number(el.maxTokens && el.maxTokens.value) || 5),
+
+      // 既存
+      targetsJson,
+      // ✅ 追加：desktop.jsで使う
+      fieldSnapshotJson
+    };
+
+    await writeConfig(config);
+
+  }
+
+
+  function onCancel() {
+    history.back();
+  }
+
+  // ===== init =====
+  async function init() {
+    try {
+      const cfg = readConfig();
+
+      if (el.pos) el.pos.value = cfg.pos;
+      if (el.spaceJoin) el.spaceJoin.value = cfg.spaceJoin;
+      if (el.maxTokens) el.maxTokens.value = String(cfg.maxTokens || 5);
+
+      const appId = getAppId();
+      fieldRows = await fetchFormFields(appId);
+
+      const selectedSet = new Set((cfg.selectedTargets || []).map(x => x.code).filter(Boolean));
+      renderFieldTable(selectedSet);
+
+      // タブ
+      el.tabs.forEach(btn => {
+        btn.addEventListener('click', () => {
+          setTabSelected(btn.dataset.type || 'ALL');
+          applyTableFilter();
+        });
+      });
+      setTabSelected('ALL');
+
+      // フィルタ
+      if (el.fieldFilter) el.fieldFilter.addEventListener('input', applyTableFilter);
+
+      // 全選択/解除（表示中のみ）
+      if (el.btnSelectAll) el.btnSelectAll.addEventListener('click', () => setVisibleCheckboxes(true));
+      if (el.btnUnselectAll) el.btnUnselectAll.addEventListener('click', () => setVisibleCheckboxes(false));
+
+      // 保存/キャンセル
+      if (el.btnSave) el.btnSave.addEventListener('click', onSave);
+      if (el.btnCancel) el.btnCancel.addEventListener('click', onCancel);
+
+      applyTableFilter();
+    } catch (e) {
+      showError(el.errBasic, `初期化に失敗しました。\n${e.message || e}`);
+      if (el.btnSave) el.btnSave.disabled = true;
+    }
+  }
+
+  init();
 })();

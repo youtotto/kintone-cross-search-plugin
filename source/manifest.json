@@ -7,8 +7,8 @@
     "ja": "横断検索プラグイン"
   },
   "description": {
-    "en": "This is a list screen plugin that allows you to search across multiple fields. You can perform flexible searches using AND/OR conditions for text, dropdowns, and attachments. If a field definition changes, it will automatically detect it and continue the search safely after excluding inconsistent items.",
-    "ja": "複数フィールドを横断して検索できる一覧画面用プラグインです。テキスト、ドロップダウン、添付ファイルを対象に、AND / OR 条件で柔軟な検索が行えます。フィールド定義の変更があった場合は自動で検知し、不一致の項目を除外した上で安全に検索を継続します。"
+    "en": "This is a list screen plugin that allows you to search across multiple fields.",
+    "ja": "複数フィールドを横断して検索できる一覧画面用プラグインです。テキスト、ドロップダウン、添付ファイルを対象に、AND / OR 条件で柔軟な検索が行えます。"
   },
   "icon": "image/icon.png",
   "desktop": {

@@ -8,6 +8,8 @@ AND / OR 条件で柔軟な検索を行うことができます。
 単なる検索機能の追加ではなく、
 運用中のフィールド構成変更によって検索が壊れないことを重視して設計しています。
 
+<img width="1556" height="956" alt="スクリーンショット 2026-01-15 133339" src="https://github.com/user-attachments/assets/f6f0522a-6f86-4573-9e91-3dd911e0ed65" />
+
 ---
 
 ## 特徴
@@ -17,7 +19,8 @@ AND / OR 条件で柔軟な検索を行うことができます。
 - ドロップダウン（in）
 - 添付ファイル（like）
 
----
+<img width="1770" height="1205" alt="スクリーンショット 2026-01-15 133240" src="https://github.com/user-attachments/assets/5f53c205-f158-42ab-b9cc-e55695407086" />
+
 
 ### 🔗 AND / OR 条件対応
 - 💾 設定時のフィールド構成をスナップショットとして保存
@@ -25,7 +28,13 @@ AND / OR 条件で柔軟な検索を行うことができます。
 - 不一致のフィールドは検索対象から自動除外
 - 検索自体は継続可能
 
----
+
+#### 検索条件は一覧画面上で確認可能
+<img width="1556" height="956" alt="スクリーンショット 2026-01-15 133339" src="https://github.com/user-attachments/assets/97c0429d-30f6-4403-80ad-d6f281ae3927" />
+
+#### アプリ改修でフィールド設定が変わった場合は、不一致を自動検知
+<img width="1156" height="507" alt="image" src="https://github.com/user-attachments/assets/52c4c398-d757-4369-be4e-45192b59fc55" />
+
 
 ### 🛡 検索不能にならない安全設計
 - 差分検知に失敗しても、設定時の条件でフォールバック
